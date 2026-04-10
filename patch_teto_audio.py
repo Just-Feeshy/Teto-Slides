@@ -17,18 +17,26 @@ AUDIO_HOOK = f"""{START_MARKER}
 
   var TetoSlideAudio = {{
     targetHeading: "Time Out",
-    audioPaths: [
-      "audio/Teto_P1.wav",
-      "audio/Teto_P2.wav",
-      "audio/Teto_P3.wav",
-      "audio/Teto_P4.wav",
-      "audio/Teto_P5.wav",
-      "audio/Teto_P6.wav"
+    audioSteps: [
+      {{ audioPath: "audio/Teto_P1.wav" }},
+      {{ audioPath: "audio/Teto_P2.wav" }},
+      {{ audioPath: "audio/Teto_P3.wav" }},
+      {{ audioPath: "audio/Teto_P4.wav" }},
+      {{ audioPath: "audio/Teto_P5.wav" }},
+      {{ audioPath: "audio/Teto_P6.wav" }},
+      {{ audioPath: "audio/Teto_P7.wav" }},
+      {{ audioPath: "audio/Teto_P8.wav" }},
+      {{ audioPath: "audio/Teto_P9.wav" }},
+      {{ audioPath: "audio/Teto_P10.wav" }}
     ],
+    responseStep: {{ audioPath: "audio/Teto_P11.wav", heading: "Teto's Response" }},
     targetSlide: null,
     players: [],
+    responsePlayer: null,
+    currentAudio: null,
     activeIndex: -1,
     hasStarted: false,
+    responseHasStarted: false,
     isAdvancing: false,
     isLocked: false,
 
@@ -39,13 +47,18 @@ AUDIO_HOOK = f"""{START_MARKER}
         return;
       }}
 
-      this.players = this.audioPaths.map(function (audioPath) {{
-        var player = new Audio(audioPath);
+      this.players = this.audioSteps.map(function (step) {{
+        var player = new Audio(step.audioPath);
         player.preload = "auto";
         player.addEventListener("ended", TetoSlideAudio.playNextStep.bind(TetoSlideAudio));
         player.addEventListener("error", TetoSlideAudio.abortSequence.bind(TetoSlideAudio));
         return player;
       }});
+
+      this.responsePlayer = new Audio(this.responseStep.audioPath);
+      this.responsePlayer.preload = "auto";
+      this.responsePlayer.addEventListener("ended", this.unlock.bind(this));
+      this.responsePlayer.addEventListener("error", this.abortSequence.bind(this));
 
       this.checkCurrentSlide();
       Reveal.on("beforeslidechange", this.preventLeavingTargetSlide.bind(this));
@@ -64,17 +77,32 @@ AUDIO_HOOK = f"""{START_MARKER}
       return null;
     }},
 
+    currentSlideHasHeading: function (headingText) {{
+      var currentSlide = Reveal.getCurrentSlide();
+      var headings = currentSlide ? currentSlide.querySelectorAll("h1, h2, h3") : [];
+      for (var i = 0; i < headings.length; i += 1) {{
+        if (this.normalizeHeading(headings[i].textContent) === this.normalizeHeading(headingText)) {{
+          return true;
+        }}
+      }}
+      return false;
+    }},
+
     normalizeHeading: function (text) {{
       return text.trim().replace(/[!?.]+$/, "").toLowerCase();
     }},
 
     checkCurrentSlide: function () {{
-      if (!this.players.length || !this.targetSlide || this.hasStarted) {{
+      if (!this.targetSlide) {{
         return;
       }}
 
-      if (Reveal.getCurrentSlide() === this.targetSlide) {{
+      if (this.players.length && !this.hasStarted && Reveal.getCurrentSlide() === this.targetSlide) {{
         this.startSequence();
+      }}
+
+      if (this.responsePlayer && !this.responseHasStarted && this.currentSlideHasHeading(this.responseStep.heading)) {{
+        this.startResponseLine();
       }}
     }},
 
@@ -85,6 +113,11 @@ AUDIO_HOOK = f"""{START_MARKER}
       this.playCurrentLine();
     }},
 
+    startResponseLine: function () {{
+      this.responseHasStarted = true;
+      this.playAudio(this.responsePlayer);
+    }},
+
     playCurrentLine: function () {{
       var audio = this.players[this.activeIndex];
       if (!audio) {{
@@ -92,7 +125,12 @@ AUDIO_HOOK = f"""{START_MARKER}
         return;
       }}
 
+      this.playAudio(audio);
+    }},
+
+    playAudio: function (audio) {{
       audio.currentTime = 0;
+      this.currentAudio = audio;
       this.lock();
 
       var playPromise = audio.play();
@@ -116,6 +154,7 @@ AUDIO_HOOK = f"""{START_MARKER}
 
     advanceDeck: function () {{
       this.isAdvancing = true;
+      this.currentAudio = null;
       Reveal.next();
       window.setTimeout(function () {{
         TetoSlideAudio.isAdvancing = false;
@@ -150,8 +189,8 @@ AUDIO_HOOK = f"""{START_MARKER}
         document.removeEventListener("click", retry);
         document.removeEventListener("keydown", retry);
         document.removeEventListener("touchstart", retry);
-        if (TetoSlideAudio.isLocked) {{
-          TetoSlideAudio.playCurrentLine();
+        if (TetoSlideAudio.isLocked && TetoSlideAudio.currentAudio) {{
+          TetoSlideAudio.playAudio(TetoSlideAudio.currentAudio);
         }} else {{
           TetoSlideAudio.checkCurrentSlide();
         }}
