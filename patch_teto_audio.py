@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch a generated Reveal.js export to play Teto_P1 on the first Time Out slide."""
+"""Patch a generated Reveal.js export to run the Teto audio sequence."""
 
 from __future__ import annotations
 
@@ -17,10 +17,19 @@ AUDIO_HOOK = f"""{START_MARKER}
 
   var TetoSlideAudio = {{
     targetHeading: "Time Out",
-    audioPath: "audio/Teto_P1.wav",
+    audioPaths: [
+      "audio/Teto_P1.wav",
+      "audio/Teto_P2.wav",
+      "audio/Teto_P3.wav",
+      "audio/Teto_P4.wav",
+      "audio/Teto_P5.wav",
+      "audio/Teto_P6.wav"
+    ],
     targetSlide: null,
-    player: null,
-    hasPlayed: false,
+    players: [],
+    activeIndex: -1,
+    hasStarted: false,
+    isAdvancing: false,
     isLocked: false,
 
     init: function () {{
@@ -30,14 +39,19 @@ AUDIO_HOOK = f"""{START_MARKER}
         return;
       }}
 
-      this.player = new Audio(this.audioPath);
-      this.player.preload = "auto";
-      this.player.addEventListener("ended", this.unlock.bind(this));
-      this.player.addEventListener("error", this.unlock.bind(this));
+      this.players = this.audioPaths.map(function (audioPath) {{
+        var player = new Audio(audioPath);
+        player.preload = "auto";
+        player.addEventListener("ended", TetoSlideAudio.playNextStep.bind(TetoSlideAudio));
+        player.addEventListener("error", TetoSlideAudio.abortSequence.bind(TetoSlideAudio));
+        return player;
+      }});
 
       this.checkCurrentSlide();
       Reveal.on("beforeslidechange", this.preventLeavingTargetSlide.bind(this));
       Reveal.on("slidechanged", this.checkCurrentSlide.bind(this));
+      Reveal.on("fragmentshown", this.checkCurrentSlide.bind(this));
+      Reveal.on("fragmenthidden", this.checkCurrentSlide.bind(this));
     }},
 
     findFirstHeadingSlide: function (headingText) {{
@@ -55,33 +69,62 @@ AUDIO_HOOK = f"""{START_MARKER}
     }},
 
     checkCurrentSlide: function () {{
-      if (!this.player || !this.targetSlide || this.hasPlayed) {{
+      if (!this.players.length || !this.targetSlide || this.hasStarted) {{
         return;
       }}
 
       if (Reveal.getCurrentSlide() === this.targetSlide) {{
-        this.play();
+        this.startSequence();
       }}
     }},
 
-    play: function () {{
-      var audio = this.player;
+    startSequence: function () {{
+      this.hasStarted = true;
+      this.activeIndex = 0;
+      this.lock();
+      this.playCurrentLine();
+    }},
+
+    playCurrentLine: function () {{
+      var audio = this.players[this.activeIndex];
+      if (!audio) {{
+        this.unlock();
+        return;
+      }}
+
       audio.currentTime = 0;
       this.lock();
 
       var playPromise = audio.play();
-      this.hasPlayed = true;
 
       if (playPromise && typeof playPromise.catch === "function") {{
         playPromise.catch(function () {{
-          TetoSlideAudio.hasPlayed = false;
           TetoSlideAudio.retryAfterUserGesture();
         }});
       }}
     }},
 
+    playNextStep: function () {{
+      if (this.activeIndex >= this.players.length - 1) {{
+        this.unlock();
+        return;
+      }}
+
+      this.activeIndex += 1;
+      this.advanceDeck();
+    }},
+
+    advanceDeck: function () {{
+      this.isAdvancing = true;
+      Reveal.next();
+      window.setTimeout(function () {{
+        TetoSlideAudio.isAdvancing = false;
+        TetoSlideAudio.playCurrentLine();
+      }}, 350);
+    }},
+
     preventLeavingTargetSlide: function (event) {{
-      if (!this.isLocked || Reveal.getCurrentSlide() !== this.targetSlide) {{
+      if (!this.isLocked || this.isAdvancing) {{
         return;
       }}
 
@@ -94,6 +137,12 @@ AUDIO_HOOK = f"""{START_MARKER}
 
     unlock: function () {{
       this.isLocked = false;
+      this.isAdvancing = false;
+    }},
+
+    abortSequence: function () {{
+      console.warn("Teto audio: stopping the autoplay sequence after an audio error.");
+      this.unlock();
     }},
 
     retryAfterUserGesture: function () {{
@@ -101,7 +150,11 @@ AUDIO_HOOK = f"""{START_MARKER}
         document.removeEventListener("click", retry);
         document.removeEventListener("keydown", retry);
         document.removeEventListener("touchstart", retry);
-        TetoSlideAudio.checkCurrentSlide();
+        if (TetoSlideAudio.isLocked) {{
+          TetoSlideAudio.playCurrentLine();
+        }} else {{
+          TetoSlideAudio.checkCurrentSlide();
+        }}
       }};
 
       document.addEventListener("click", retry, {{ once: true }});
@@ -129,7 +182,7 @@ def remove_existing_hook(html: str) -> str:
 
     end = html.find(END_MARKER, start)
     if end == -1:
-      raise ValueError("Found the Teto audio start marker, but not the end marker.")
+        raise ValueError("Found the Teto audio start marker, but not the end marker.")
 
     return html[:start].rstrip() + "\n\n" + html[end + len(END_MARKER):].lstrip()
 
@@ -145,7 +198,7 @@ def patch_html(html: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Inject Teto_P1.wav playback into the first Reveal.js Time Out slide."
+        description="Inject the finite Teto audio autoplay sequence into the Reveal.js export."
     )
     parser.add_argument(
         "html",
@@ -159,7 +212,7 @@ def main() -> None:
     html = html_path.read_text(encoding="utf-8")
     patched_html = patch_html(html)
     html_path.write_text(patched_html, encoding="utf-8")
-    print(f"Patched {html_path} to play audio/Teto_P1.wav on the first Time Out! slide.")
+    print(f"Patched {html_path} to run the Teto audio autoplay sequence.")
 
 
 if __name__ == "__main__":
